@@ -1,7 +1,7 @@
 'use strict';
 // 離線快取：HTML 走「網路優先」（有網拿最新版），其餘「快取優先」
 // 改版時把 CACHE 版本號 +1，舊快取會自動清掉
-const CACHE = 'maze-v5';
+const CACHE = 'maze-v6';
 const ASSETS = [
   './',
   './index.html',
@@ -30,8 +30,10 @@ self.addEventListener('fetch', e => {
   if (req.method !== 'GET') return;
   const isHtml = req.mode === 'navigate' || (req.headers.get('accept') || '').includes('text/html');
   if (isHtml) {
+    // ⚠ 一定要用 cache:'reload' 繞過瀏覽器的 HTTP 快取。
+    //   單純 fetch(req) 會吃到 GitHub Pages 的 max-age，玩家可能好幾次重開都拿到舊版。
     e.respondWith(
-      fetch(req)
+      fetch(new Request(req.url, { cache: 'reload', credentials: 'same-origin' }))
         .then(res => {
           const copy = res.clone();
           caches.open(CACHE).then(c => c.put(req, copy));

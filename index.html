@@ -634,6 +634,7 @@ function resetProgress() {
    跳過整條重新設計的難度曲線 —— 所以由程式主動作廢，不要求玩家自己去清。
    ⚠ 動到 LEVELS 內容時，LEVELS_VERSION 要 +1。 */
 const LEVELS_VERSION = 3;
+const APP_VERSION = 'v6';     // 與 sw.js 的 CACHE 版本同步，顯示在主畫面底部供回報用
 let progressWiped = false;
 function migrateProgress() {
   const savedVer = parseInt(lsGet('maze_lv_ver', '0'), 10) || 0;
@@ -1152,7 +1153,8 @@ function showTitle() {
     '<button class="primary" data-act="start">' + (started ? '繼續第 ' + Math.min(cleared + 1, LEVELS.length) + ' 關' : '開始遊戲') + '</button>' +
     (started ? '<button data-act="levels">選擇關卡</button>' : '') +
     '<button class="ghost" data-act="settings">設定</button>' +
-    '<div class="note">iPhone / Android 會請求動作感測器權限；電腦上用方向鍵或滑鼠拖曳。</div>',
+    '<div class="note">iPhone / Android 會請求動作感測器權限；電腦上用方向鍵或滑鼠拖曳。<br>' +
+    '<span style="color:#4c5766">' + APP_VERSION + ' · 關卡 v' + LEVELS_VERSION + '</span></div>',
   );
 }
 function showLevels() {
@@ -1166,6 +1168,7 @@ function showSettings() {
     '<div class="row"><span>靈敏度</span><input type="range" id="sens" min="0.4" max="2.2" step="0.1" value="' + sens + '"><span id="sensv">' + sens.toFixed(1) + '</span></div>' +
     '<button data-act="recal">把目前姿勢設為水平</button>' +
     '<button data-act="sfx">音效：' + (sfxOn ? '開' : '關') + '</button>' +
+    '<button data-act="update">檢查更新（' + APP_VERSION + '）</button>' +
     '<div class="note" style="margin-bottom:14px">拿著手機的角度不會是完全水平。覺得球一直往同一邊跑，就按上面那顆重新校正。</div>' +
     (cleared > 0
       ? '<button data-act="reset" class="' + (resetArmed ? 'danger' : 'ghost') + '">' +
@@ -1226,6 +1229,32 @@ function enableTilt() {
   return Promise.resolve();
 }
 
+/* ══════════════ 強制更新 ══════════════
+   最後手段：砍掉所有快取、註銷 sw，再用帶時戳的網址重載。
+   給「重開好幾次還是舊版」的情況用 —— 玩家不該需要去系統設定清網站資料。 */
+function forceUpdate() {
+  const done = function () {
+    const u = location.origin + location.pathname + '?u=' + Date.now();
+    location.replace(u);
+  };
+  try {
+    const jobs = [];
+    if (typeof caches !== 'undefined' && caches.keys) {
+      jobs.push(caches.keys().then(function (ks) {
+        return Promise.all(ks.map(function (k) { return caches.delete(k); }));
+      }));
+    }
+    if (navigator.serviceWorker && navigator.serviceWorker.getRegistrations) {
+      jobs.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+        return Promise.all(rs.map(function (r) { return r.unregister(); }));
+      }));
+    }
+    if (!jobs.length) return done();
+    Promise.all(jobs).then(done, done);
+    setTimeout(done, 2500);        // 卡住也要走
+  } catch (e) { done(); }
+}
+
 /* ══════════════ 事件 ══════════════ */
 function act(a, el) {
   initAudio();                          // 必須在使用者手勢裡啟動，iOS 才給聲音
@@ -1245,6 +1274,7 @@ function act(a, el) {
     if (!resetArmed) { resetArmed = true; showSettings(); }        // 第一次只是舉起，不動資料
     else { resetProgress(); resetArmed = false; showTitle(); }     // 再按一次才真的清
   }
+  else if (a === 'update') forceUpdate();
 }
 
 function bindEvents() {
@@ -1312,7 +1342,21 @@ function init() {
   showTitle();
   requestAnimationFrame(frame);
   if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
-    navigator.serviceWorker.register('sw.js').catch(function () {});
+    // updateViaCache:'none' —— 不讓瀏覽器快取 sw.js 本身，否則新版 sw 永遠裝不上，
+    // 玩家會一直被舊 sw 服務舊 HTML（v5 就是這樣卡住的）。
+    navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(function (reg) {
+      try { reg.update(); } catch (e) {}
+      reg.addEventListener('updatefound', function () {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', function () {
+          // 新版裝好且目前已有 controller（代表是「更新」不是首次安裝）→ 自動換上新版
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            location.reload();
+          }
+        });
+      });
+    }).catch(function () {});
   }
 }
 init();
