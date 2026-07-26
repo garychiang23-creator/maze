@@ -511,6 +511,23 @@ const FALL_TIME = 0.55;       // 掉洞動畫秒數
 const CLEAR_TIME = 0.7;       // 過關動畫秒數
 
 const WALL = '#', OPEN = '.', HOLE = 'O', START = '@', GOAL = 'X', ICE = '~', SAND = ':';
+
+/* 配色：一組實色，全部集中在這裡。
+   ⚠ 這個遊戲是**平面設計**，不是擬真。任何漸層、偽 3D、紋理、投影都不要加回去 ——
+     v7 加牆頂高光（像廉價磚牆）、v8 加 forced perspective 側壁（更廉價），兩次都是同一個毛病：
+     用擬真效果冒充質感。訊息靠顏色和形狀傳達就夠了。
+   洞刻意用接近背景的深色，視覺上才真的像「穿透盤面的孔」。 */
+const C = {
+  bg:     '#1a1814',
+  board:  '#ded7c7',
+  wall:   '#4a4438',
+  hole:   '#14120e',
+  goal:   '#e8b93a',
+  ball:   '#e8a72c',
+  ballHi: '#ffe6a3',
+  ice:    '#9ecfe8',
+  sand:   '#c9a86a',
+};
 // 每種地形的速度衰減係數（越大越黏）
 // ⚠ 一般地面 0.55 是刻意的低摩擦：球會持續滾動，必須反向傾斜剎車。
 //   舊值 1.1 讓球很快自己停下，玩家可以「推一下、停、再推一下」安全通關 —— 那是難度歸零的真兇。
@@ -653,7 +670,7 @@ function resetProgress() {
    跳過整條重新設計的難度曲線 —— 所以由程式主動作廢，不要求玩家自己去清。
    ⚠ 動到 LEVELS 內容時，LEVELS_VERSION 要 +1。 */
 const LEVELS_VERSION = 4;
-const APP_VERSION = 'v8';     // 與 sw.js 的 CACHE 版本同步，顯示在主畫面底部供回報用
+const APP_VERSION = 'v9';     // 與 sw.js 的 CACHE 版本同步，顯示在主畫面底部供回報用
 let progressWiped = false;
 function migrateProgress() {
   const savedVer = parseInt(lsGet('maze_lv_ver', '0'), 10) || 0;
@@ -990,7 +1007,7 @@ function fmtTime(t) {
 
 function draw() {
   if (!ctx) return;
-  ctx.fillStyle = '#171a21';
+  ctx.fillStyle = C.bg;
   ctx.fillRect(0, 0, W, H);
   if (!grid) return;
 
@@ -1005,10 +1022,17 @@ function draw() {
   ctx.save();
   ctx.translate(ox + shx, oy + shy);
 
-  // 盤底：溫暖的中等木色。v6 太暗、v7 又白到刺眼（Gary：「道路白色的很醜」），
-  // 這裡取中間值——夠亮讓路徑清楚，夠深不刺眼，且是暖色不是慘白。
-  ctx.fillStyle = '#c2ab86';
+  // 盤底：單一實色。夠亮讓路徑清楚、夠沉不刺眼，暖灰不是慘白。
+  ctx.fillStyle = C.board;
   ctx.fillRect(0, 0, board, board);
+
+  /* 逐格填色時必須對齊像素邊界再畫。
+     cellPx 通常不是整數（例如 410/19 ≈ 21.58），直接 fillRect 會在每格邊緣留下
+     半透明的抗鋸齒縫 → 整片牆看起來爬滿格線，像試算表。這是廉價感的來源之一。 */
+  const cellRect = (c, r) => {
+    const x0 = Math.floor(c * cellPx), y0 = Math.floor(r * cellPx);
+    ctx.fillRect(x0, y0, Math.ceil((c + 1) * cellPx) - x0, Math.ceil((r + 1) * cellPx) - y0);
+  };
 
   // 地形
   for (let r = 0; r < N; r++) {
@@ -1016,45 +1040,22 @@ function draw() {
       const ch = grid[r][c];
       if (ch !== ICE && ch !== SAND) continue;
       // 對比刻意拉高：地形換了玩家要一眼看見，否則「剎不住」會被當成 bug 而不是設計
-      // 冰＝光滑反光、沙＝粗糙顆粒。兩者的質感要相反，玩家才分得出腳下換了什麼
-      ctx.fillStyle = ch === ICE ? 'rgba(150,205,238,.62)' : 'rgba(88,58,26,.50)';
-      ctx.fillRect(c * cellPx, r * cellPx, cellPx, cellPx);
-      if (ch === ICE) {
-        ctx.strokeStyle = 'rgba(255,255,255,.55)';
-        ctx.lineWidth = Math.max(1, cellPx * 0.05);
-        ctx.beginPath();
-        ctx.moveTo(c * cellPx + cellPx * 0.18, (r + 1) * cellPx - cellPx * 0.18);
-        ctx.lineTo((c + 1) * cellPx - cellPx * 0.18, r * cellPx + cellPx * 0.18);
-        ctx.stroke();
-      } else {
-        // 顆粒用格座標當種子算出固定位置，不能用亂數 —— 否則每幀都在跳、像雜訊
-        ctx.fillStyle = 'rgba(52,34,14,.45)';
-        const q = cellPx / 4, dot = Math.max(1, cellPx * 0.10);
-        for (let i = 0; i < 4; i++) {
-          const gx = ((c * 7 + r * 13 + i * 5) % 4) * q + q * 0.35;
-          const gy = ((c * 11 + r * 5 + i * 3) % 4) * q + q * 0.35;
-          ctx.fillRect(c * cellPx + gx, r * cellPx + gy, dot, dot);
-        }
-      }
+      // 地形：實色色塊，靠顏色區分，不做反光也不做顆粒
+      ctx.fillStyle = ch === ICE ? C.ice : C.sand;
+      cellRect(c, r);
     }
   }
 
   // 牆（陰影方向跟著傾斜，強化立體感）
-  /* forced perspective：傾斜時牆露出側壁，製造「這是一塊立體木盤」的錯覺。
-     （Wooden Labyrinth 3D 就是靠這個手法拿下 2009 Apple Design Award。）
-     ⚠ 每格牆只畫「側壁 + 頂面」兩層純色，**不畫任何格線或頂部高光** ——
-       v7 在每格頂端加亮邊，相鄰牆就被切成一塊一塊，看起來像廉價磚牆。
-       純色填充會讓相鄰牆自然融成一整片，那才像一塊挖出來的木板。 */
-  const px = tiltX * cellPx * 0.60, py = tiltY * cellPx * 0.60;
-  ctx.fillStyle = '#3b3126';                       // 側壁（背光面）
+  /* 牆：單一實色，就這樣。
+     ⚠ 不要偽 3D 側壁、不要頂部高光、不要格線、不要漸層。
+       v7 加每格亮邊 → 看起來像廉價磚牆；v8 加 forced perspective 側壁 → 更廉價。
+       兩次都是同一個毛病：**用擬真效果冒充質感**。這個遊戲的定位是簡單平面，
+       克制才是功力（Gary 對其他作品也是這個偏好）。 */
+  ctx.fillStyle = C.wall;
   for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
     if (grid[r][c] !== WALL) continue;
-    ctx.fillRect(c * cellPx + px, r * cellPx + py, cellPx, cellPx);
-  }
-  ctx.fillStyle = '#6d5d47';                       // 頂面（受光面）
-  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
-    if (grid[r][c] !== WALL) continue;
-    ctx.fillRect(c * cellPx, r * cellPx, cellPx, cellPx);
+    cellRect(c, r);
   }
 
   // 洞
@@ -1064,31 +1065,15 @@ function draw() {
       if (ch !== HOLE && ch !== GOAL) continue;
       const x = (c + 0.5) * cellPx, y = (r + 0.5) * cellPx, rad = HOLE_R * cellPx;
       if (ch === GOAL) {
-        ctx.beginPath(); ctx.arc(x, y, rad + Math.max(1.5, cellPx * 0.11), 0, Math.PI * 2);
-        ctx.fillStyle = 'rgba(212,160,23,.30)'; ctx.fill();
+        // 終點：同樣是實心圓，靠一圈亮色環跟陷阱區分
         ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
-        ctx.fillStyle = '#15120e'; ctx.fill();
-        ctx.lineWidth = Math.max(1.4, cellPx * 0.09); ctx.strokeStyle = '#d4a017'; ctx.stroke();
+        ctx.fillStyle = C.hole; ctx.fill();
+        ctx.lineWidth = Math.max(2, cellPx * 0.13);
+        ctx.strokeStyle = C.goal; ctx.stroke();
       } else {
-        /* 洞要有「深度」不能是貼上去的黑圓（Gary：「黑色坑洞比原本的還難看」）。
-           三層：木頭斷面的暖色內壁 → 徑向漸層往中心沉黑 → 受光側一道細高光。
-           傾斜時洞口高光跟著移動，強化「這是挖穿木板的孔」而不是畫上去的點。 */
-        let hg = null;
-        if (ctx.createRadialGradient) {
-          hg = ctx.createRadialGradient(x - tiltX * rad * 0.30, y - tiltY * rad * 0.30, rad * 0.12, x, y, rad);
-          hg.addColorStop(0, '#000000');
-          hg.addColorStop(0.55, '#0b0805');
-          hg.addColorStop(0.88, '#3a2d1d');
-          hg.addColorStop(1, '#6b5334');
-        }
+        // 洞：實心圓，不做漸層深度。形狀和顏色已經足以表達「這裡不能碰」。
         ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
-        ctx.fillStyle = hg || '#0b0805'; ctx.fill();
-        ctx.lineWidth = Math.max(1, cellPx * 0.055);
-        ctx.strokeStyle = 'rgba(70,52,30,.55)'; ctx.stroke();
-        ctx.beginPath();
-        ctx.arc(x, y, rad * 0.93, Math.PI * 0.72, Math.PI * 1.42);
-        ctx.lineWidth = Math.max(1, cellPx * 0.05);
-        ctx.strokeStyle = 'rgba(226,205,170,.42)'; ctx.stroke();
+        ctx.fillStyle = C.hole; ctx.fill();
       }
     }
   }
@@ -1110,44 +1095,18 @@ function draw() {
   if (br > 0.4) {
     ctx.globalAlpha = alpha;
     // 球踩在冰上時罩一層藍光 —— 「現在轉不動」要是看得見的狀態，不是只能用猜的
-    if (state === 'playing' && cellAt(ball.x, ball.y) === ICE) {
-      ctx.beginPath(); ctx.arc(bx, by, br * 1.5, 0, Math.PI * 2);
-      ctx.fillStyle = 'rgba(120,200,255,.30)'; ctx.fill();
-    }
-    // 陰影跟著傾斜方向偏移：盤子傾斜 → 光源相對移動 → 球看起來浮在盤面上
-    ctx.beginPath();
-    ctx.arc(bx + br * 0.22 + tiltX * br * 0.30, by + br * 0.28 + tiltY * br * 0.30, br * 0.98, 0, Math.PI * 2);
-    ctx.fillStyle = 'rgba(48,34,14,.34)'; ctx.fill();
-    let grad = null;
-    if (ctx.createRadialGradient) {
-      // 金球（Gary 定調：原本的金色好看）。高光位置隨傾斜移動＝金屬感的來源。
-      grad = ctx.createRadialGradient(bx - br * 0.35 - tiltX * br * 0.2, by - br * 0.35 - tiltY * br * 0.2, br * 0.08, bx, by, br);
-      grad.addColorStop(0, '#fffbe8'); grad.addColorStop(0.34, '#f0cf6a');
-      grad.addColorStop(0.74, '#c99a2c'); grad.addColorStop(1, '#7d5f14');
-    }
+    // 球：實色圓 + 一個固定的小高光點。不做徑向漸層、不做投影、不做冰上光暈。
     ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
-    ctx.fillStyle = grad || '#e6c15a'; ctx.fill();
-    ctx.lineWidth = Math.max(1, br * 0.11);          // 深色輪廓：在木色盤上鎖住形狀
-    ctx.strokeStyle = 'rgba(58,42,12,.55)'; ctx.stroke();
+    ctx.fillStyle = C.ball; ctx.fill();
+    ctx.beginPath();
+    ctx.arc(bx - br * 0.30, by - br * 0.30, br * 0.26, 0, Math.PI * 2);
+    ctx.fillStyle = C.ballHi; ctx.fill();
 
-    // 滾動紋理：兩個相位差 π 的暗點沿滾動方向擺動，轉到背面就淡出
-    if (state === 'playing') {
-      for (let k = 0; k < 2; k++) {
-        const ph = spin + k * Math.PI;
-        const vis = Math.cos(ph);
-        if (vis <= 0.02) continue;
-        const off = Math.sin(ph) * br * 0.52;
-        ctx.globalAlpha = alpha * 0.30 * vis;
-        ctx.beginPath();
-        ctx.arc(bx + spinX * off, by + spinY * off, br * 0.19, 0, Math.PI * 2);
-        ctx.fillStyle = '#7d5f14'; ctx.fill();
-      }
-    }
     ctx.globalAlpha = 1;
   }
 
   // 盤框
-  ctx.lineWidth = 4; ctx.strokeStyle = '#4a3d2c';
+  ctx.lineWidth = 3; ctx.strokeStyle = C.wall;
   ctx.strokeRect(0, 0, board, board);
   ctx.restore();
 
