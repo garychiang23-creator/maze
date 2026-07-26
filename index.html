@@ -1,0 +1,1030 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="theme-color" content="#0b0e14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="icon-180.png">
+<title>迷宮球 TILT MAZE</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body { height:100%; overflow:hidden; background:#0b0e14; color:#e6edf3;
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans TC","PingFang TC",sans-serif; }
+  #cv { display:block; width:100%; height:100%; touch-action:none; }
+  #overlay { position:fixed; inset:0; display:flex; align-items:center; justify-content:center;
+    background:rgba(11,14,20,.92); backdrop-filter:blur(6px); padding:20px; overflow-y:auto; z-index:10; }
+  #overlay.hidden { display:none; }
+  #panel { width:100%; max-width:400px; text-align:center; }
+  h1 { font-size:30px; font-weight:700; letter-spacing:.06em; }
+  .sub { font-size:12px; letter-spacing:.34em; color:#8b98a9; margin:6px 0 20px; }
+  .msg { font-size:14px; line-height:1.7; color:#b7c2d0; margin-bottom:20px; white-space:pre-line; }
+  .big { font-size:22px; color:#e6c15a; font-weight:600; margin-bottom:6px; }
+  button { font:inherit; font-size:15px; padding:13px 20px; width:100%; margin-bottom:10px;
+    background:#1b2230; color:#e6edf3; border:1px solid #2c3648; border-radius:10px; cursor:pointer; }
+  button:active { background:#243044; }
+  button.primary { background:#e6c15a; color:#1a1405; border-color:#e6c15a; font-weight:600; }
+  button.ghost { background:transparent; color:#8b98a9; border-color:#222b3a; }
+  .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin:6px 0 16px; }
+  .lv { padding:11px 0; font-size:14px; border-radius:8px; border:1px solid #2c3648;
+    background:#161c27; color:#e6edf3; cursor:pointer; }
+  .lv.lock { color:#48525f; border-color:#1b2230; background:#10151d; cursor:default; }
+  .lv.done { border-color:#3d5a3d; color:#7fbf7f; }
+  .lv.perfect { border-color:#e6c15a; color:#e6c15a; }
+  .row { display:flex; align-items:center; gap:10px; font-size:13px; color:#8b98a9; margin-bottom:14px; }
+  input[type=range] { flex:1; accent-color:#e6c15a; }
+  .note { font-size:11px; color:#6b7684; line-height:1.6; margin-top:14px; }
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<div id="overlay"><div id="panel"></div></div>
+
+<script>
+'use strict';
+
+/* ══════════════ 關卡資料 ══════════════
+   符號：# 牆  . 空地  O 陷阱洞  @ 起點  X 終點洞  ~ 冰(滑)  : 沙(黏)
+   由 gen_levels.js 生成，每關都通過 verifyLevel() 的物理可解性驗證。 */
+const LEVELS = [
+  [
+    '###############',
+    '#@............#',
+    '#.............#',
+    '#..........O..#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.O...........#',
+    '#.............#',
+    '#.............#',
+    '#.....O.......#',
+    '#.............#',
+    '#..........O..#',
+    '#.............#',
+    '#......O......#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..........O.#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.............#',
+    '#.......##....#',
+    '#O......##....#',
+    '#.......##....#',
+    '#.......##....#',
+    '#........#....#',
+    '#O.O.....O....#',
+    '#.............#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..O....O....#',
+    '#.....#.......#',
+    '#..#..#....O..#',
+    '#..#..#......O#',
+    '#..#..#.#.....#',
+    '#..#..#.#.....#',
+    '#..#....#.....#',
+    '#O.#...O#.....#',
+    '#..#....#.....#',
+    '#..#....#.....#',
+    '#.....O.#.....#',
+    '#.......#.....#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@...~~~~~....#',
+    '#....~~~~~.O..#',
+    '#....~~~~~....#',
+    '#....~~~~~....#',
+    '#....O#~~~..O.#',
+    '#.....#.......#',
+    '#.O...#.......#',
+    '#.....#..O....#',
+    '#.....#.......#',
+    '#.....#O......#',
+    '#.............#',
+    '#.....######..#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#...........O.#',
+    '#..~~#~~~.#...#',
+    '#..~~#~O~.#...#',
+    '#..~~#~~~.#..O#',
+    '#..~~#~O~.#...#',
+    '#..~~#~~~....O#',
+    '#....#........#',
+    '#...O.........#',
+    '#.....######..#',
+    '#.............#',
+    '#.............#',
+    '#.O...O......X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@.:::::O.....#',
+    '#..:::::......#',
+    '#..:::::...O..#',
+    '#..:::::###...#',
+    '#.............#',
+    '#............O#',
+    '#......#......#',
+    '#......#...O.O#',
+    '#....O.#......#',
+    '#......#......#',
+    '#......#......#',
+    '#....O........#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#.....O.....O.#',
+    '#.............#',
+    '#...#.O.#..O..#',
+    '#...#...#..#.O#',
+    '#..##...#..#..#',
+    '#O.##...#..#..#',
+    '#..##..O...#..#',
+    '#..##.........#',
+    '#..##...O.....#',
+    '#..##:::::O...#',
+    '#....::::::...#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..........O.#',
+    '#..........#..#',
+    '#...#......#..#',
+    '#...#....O.#..#',
+    '#...#.....O#..#',
+    '#...#...O..#..#',
+    '#...#......#..#',
+    '#.##########..#',
+    '#...~~~~~::#..#',
+    '#..#########..#',
+    '#..O..O::::...#',
+    '#.O...:::::...#',
+    '#...O...O.O..X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#...O~~~~~~.#.#',
+    '#....#~~#~~O#O#',
+    '#....#~~#~~.#.#',
+    '#....#~~#~~.#.#',
+    '#O...#..#...#.#',
+    '#....#..#...#.#',
+    '#O...#..#...#.#',
+    '#..O....#O..#.#',
+    '#.O.....#.....#',
+    '#.......#.....#',
+    '#........O....#',
+    '#.O.O..O.....X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@....O...O...#',
+    '#..#..#####...#',
+    '#..#.#........#',
+    '#..#.#.......O#',
+    '#..#.##.......#',
+    '#O.#.##..O...O#',
+    '#..#.##::::...#',
+    '#..#.##:O::O..#',
+    '#..#.:######..#',
+    '#....:#::::...#',
+    '#O...:#::::...#',
+    '#.............#',
+    '#..O....O....X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@....O.......#',
+    '#..~######::..#',
+    '#.~~~#######..#',
+    '#O~~~.........#',
+    '#.~~~O......O.#',
+    '#.~#########..#',
+    '#O..........O.#',
+    '#.........O...#',
+    '#..O.........O#',
+    '#..#####....O.#',
+    '#.....#######.#',
+    '#.O......O....#',
+    '#....O.......X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..O.........#',
+    '#..##########.#',
+    '#....~#~~~O.O.#',
+    '#.#..O#~~~....#',
+    '#.#.O~#~~~.#..#',
+    '#.#..~#~~~.#..#',
+    '#.#O..#....#..#',
+    '#.#...#O.O.#.O#',
+    '#.#...#.O..#O.#',
+    '#.....#....#..#',
+    '#...O.#....#..#',
+    '#.O..O#.......#',
+    '#............X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#.............#',
+    '#.########.O..#',
+    '#O.O#########.#',
+    '#...O####.....#',
+    '#.............#',
+    '#::::...O#.O..#',
+    '#::::..O.#..#O#',
+    '#::::O...#O.#.#',
+    '#........#..#.#',
+    '#O########..#.#',
+    '#....O....O...#',
+    '#.....O......X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..........O.#',
+    '#....######...#',
+    '#..#..#######O#',
+    '#..#....O...O.#',
+    '#..#O.O.......#',
+    '#..#..........#',
+    '#..#..#O...O..#',
+    '#..#.##.......#',
+    '#..#~##O~.....#',
+    '#..#~##~~.~~~O#',
+    '#.O#~##O~.~~~~#',
+    '#..#~##~~.~~..#',
+    '#O..~~~~O.O~.X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#......O..O.O.#',
+    '#..:######....#',
+    '#..::::::..O..#',
+    '#..O:::::.O...#',
+    '#.######:...#O#',
+    '#.....O..O..#.#',
+    '#.#########.#.#',
+    '#..#######..#.#',
+    '#O#######O..#.#',
+    '#.~~~~~O....#.#',
+    '#.O~~~~.......#',
+    '#.~O~~~..O...X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@.....O...O..#',
+    '#..#.########O#',
+    '#..#~~~O~O.O..#',
+    '#..#~O~~~~O.O.#',
+    '#..#~~~~O~....#',
+    '#..########...#',
+    '#..#..........#',
+    '#..#.......O.O#',
+    '#..#.O........#',
+    '#O#########O..#',
+    '#.:O:########.#',
+    '#.::::######..#',
+    '#.:::........X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@............#',
+    '#..#######O.#.#',
+    '#.......O.#.#.#',
+    '#O.#......#O#.#',
+    '#..#O.O..O#.#.#',
+    '#.##.O..O.#O#.#',
+    '#.#########~#.#',
+    '#.##O~~#~~#~#.#',
+    '#.##~~~#~~#O#.#',
+    '#.##~~~#~O#:O:#',
+    '#O##...#.:#:::#',
+    '#.##...#.:::..#',
+    '#O....O..:::.X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@.......O....#',
+    '#...O.........#',
+    '#...#######.O.#',
+    '#.##########.O#',
+    '#...#########:#',
+    '#.O:########:O#',
+    '#..######O~O::#',
+    '#....O.O~~~~::#',
+    '#.O.....~~O~~.#',
+    '#.##########~.#',
+    '#O..#########.#',
+    '#.....O.O.O...#',
+    '#......O.O...X#',
+    '###############',
+  ],
+  [
+    '###############',
+    '#@..:::::.....#',
+    '#..~O~O~:O.O#.#',
+    '#.~#######..#.#',
+    '#.O~#########:#',
+    '#.....O..O:O#:#',
+    '#O#.#########:#',
+    '#.#...O..:O:#:#',
+    '#O#~~######O#:#',
+    '#.###########.#',
+    '#.#~~O..O..O#.#',
+    '#.#~~~...O..#.#',
+    '#..########...#',
+    '#..O......O..X#',
+    '###############',
+  ],
+];
+
+/* ══════════════ 常數 ══════════════ */
+const N = 15;                 // 盤面格數
+const BALL_R = 0.30;          // 珠半徑（格）
+const HOLE_R = 0.32;          // 洞口半徑（格）
+const MAX_SPEED = 12;         // 格/秒。每個定步位移 = 12/120 = 0.1 格 < 珠半徑 → 從根本不可能穿牆
+const GRAVITY = 18;           // 滿傾斜加速度（格/秒²）
+const FIXED_DT = 1 / 120;     // 物理定步長
+const MAX_SUBSTEPS = 16;      // 單幀最多物理步數。dt 上限 0.1s = 12 步，故正常掉幀不會被截斷（物理與幀率無關）
+const MAX_TILT_DEG = 30;      // 超過此角度視為滿傾斜
+const RESTITUTION = 0.35;     // 撞牆反彈（木頭感，不要太彈）
+const TILT_SMOOTH = 14;       // 傾斜平滑速度
+const FALL_TIME = 0.55;       // 掉洞動畫秒數
+const CLEAR_TIME = 0.7;       // 過關動畫秒數
+
+const WALL = '#', OPEN = '.', HOLE = 'O', START = '@', GOAL = 'X', ICE = '~', SAND = ':';
+// 每種地形的速度衰減係數（越大越黏）
+const FRICTION = { '.': 1.1, '@': 1.1, 'X': 1.1, 'O': 1.1, '~': 0.16, ':': 6.0, '#': 1.1 };
+
+/* ══════════════ 狀態 ══════════════ */
+let state = 'menu';           // menu | playing | falling | cleared | finished | paused
+let level = 0;                // 0-based
+let grid = null;              // 當前關卡（字串陣列）
+let ball = { x: 1.5, y: 1.5, vx: 0, vy: 0 };
+let startCell = { c: 1, r: 1 };
+let goalCell = { c: 13, r: 13 };
+let elapsed = 0;              // 本關計時
+let fails = 0;                // 本關失誤
+let anim = 0;                 // 動畫計時
+let fallAt = null;            // 掉入的洞座標（動畫用）
+let accumulator = 0;
+let tiltX = 0, tiltY = 0;             // 實際套用的傾斜 -1..1
+let targetTiltX = 0, targetTiltY = 0; // 輸入目標
+let controlMode = 'keys';     // tilt | keys | drag
+let sens = 1.0;               // 靈敏度
+let calBeta = null, calGamma = null;  // 陀螺儀校正基準
+let lastBeta = 0, lastGamma = 0;
+const keys = Object.create(null);
+
+/* ══════════════ 進度儲存 ══════════════ */
+function lsGet(k, d) {
+  try { const v = localStorage.getItem(k); return v === null ? d : v; } catch (e) { return d; }
+}
+function lsSet(k, v) { try { localStorage.setItem(k, String(v)); } catch (e) {} }
+
+let cleared = parseInt(lsGet('maze_cleared', '0'), 10) || 0;   // 已通關的最高關卡數
+let perfects = parseInt(lsGet('maze_perfect', '0'), 10) || 0;  // 無失誤通關的關卡數
+let times = (() => { try { return JSON.parse(lsGet('maze_times', '{}')) || {}; } catch (e) { return {}; } })();
+sens = parseFloat(lsGet('maze_sens', '1')) || 1;
+
+function saveProgress() {
+  lsSet('maze_cleared', cleared);
+  lsSet('maze_perfect', perfects);
+  try { lsSet('maze_times', JSON.stringify(times)); } catch (e) {}
+}
+
+/* ══════════════ 關卡解析 ══════════════ */
+function parseLevel(rows) {
+  const g = rows.slice();
+  let s = null, gl = null;
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (g[r][c] === START) s = { c, r };
+    if (g[r][c] === GOAL) gl = { c, r };
+  }
+  return { grid: g, start: s, goal: gl };
+}
+function cellCh(c, r) {
+  if (r < 0 || r >= N || c < 0 || c >= N || !grid) return WALL;
+  return grid[r][c];
+}
+function cellAt(x, y) { return cellCh(Math.floor(x), Math.floor(y)); }
+function isWall(c, r) { return cellCh(c, r) === WALL; }
+
+/* ══════════════ 可解性驗證（configuration space）══════════════
+   把牆按珠半徑膨脹、把陷阱洞當禁區，在細網格上 flood fill。
+   用的是上面真正的 BALL_R / HOLE_R —— 調整珠子大小時，測試會自動用新值重驗全部關卡。 */
+function verifyLevel(rows, step) {
+  step = step || 0.1;
+  const M = Math.round(N / step);
+  const free = new Uint8Array(M * M).fill(1);
+  const idx = (i, j) => j * M + i;
+  let s = null, gl = null;
+
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    const ch = rows[r][c];
+    if (ch === START) s = { c, r };
+    if (ch === GOAL) gl = { c, r };
+    if (ch === WALL) {
+      const i0 = Math.max(0, Math.floor((c - BALL_R) / step)), i1 = Math.min(M - 1, Math.ceil((c + 1 + BALL_R) / step));
+      const j0 = Math.max(0, Math.floor((r - BALL_R) / step)), j1 = Math.min(M - 1, Math.ceil((r + 1 + BALL_R) / step));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const x = (i + 0.5) * step, y = (j + 0.5) * step;
+        const dx = Math.max(c - x, 0, x - (c + 1)), dy = Math.max(r - y, 0, y - (r + 1));
+        if (dx * dx + dy * dy < BALL_R * BALL_R) free[idx(i, j)] = 0;
+      }
+    }
+    if (ch === HOLE) {
+      const hx = c + 0.5, hy = r + 0.5;
+      const i0 = Math.max(0, Math.floor((hx - HOLE_R) / step)), i1 = Math.min(M - 1, Math.ceil((hx + HOLE_R) / step));
+      const j0 = Math.max(0, Math.floor((hy - HOLE_R) / step)), j1 = Math.min(M - 1, Math.ceil((hy + HOLE_R) / step));
+      for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+        const dx = (i + 0.5) * step - hx, dy = (j + 0.5) * step - hy;
+        if (dx * dx + dy * dy < HOLE_R * HOLE_R) free[idx(i, j)] = 0;
+      }
+    }
+  }
+  if (!s || !gl) return { ok: false, why: 'missing start or goal' };
+
+  const toG = v => Math.min(M - 1, Math.max(0, Math.round(v / step - 0.5)));
+  const si = toG(s.c + 0.5), sj = toG(s.r + 0.5);
+  const gx = gl.c + 0.5, gy = gl.r + 0.5;
+  if (!free[idx(si, sj)]) return { ok: false, why: 'start blocked' };
+
+  const seen = new Uint8Array(M * M);
+  const st = [[si, sj]];
+  seen[idx(si, sj)] = 1;
+  let reached = false, reach = 0;
+  while (st.length) {
+    const p = st.pop(), i = p[0], j = p[1];
+    reach++;
+    const dx = (i + 0.5) * step - gx, dy = (j + 0.5) * step - gy;
+    if (dx * dx + dy * dy < HOLE_R * HOLE_R) reached = true;
+    const nb = [[1, 0], [-1, 0], [0, 1], [0, -1]];
+    for (let k = 0; k < 4; k++) {
+      const ni = i + nb[k][0], nj = j + nb[k][1];
+      if (ni < 0 || nj < 0 || ni >= M || nj >= M) continue;
+      if (seen[idx(ni, nj)] || !free[idx(ni, nj)]) continue;
+      seen[idx(ni, nj)] = 1;
+      st.push([ni, nj]);
+    }
+  }
+  return { ok: reached, why: reached ? '' : 'goal unreachable', reach: reach };
+}
+
+/* ══════════════ 遊戲流程 ══════════════ */
+function resetBall() {
+  ball.x = startCell.c + 0.5;
+  ball.y = startCell.r + 0.5;
+  ball.vx = 0; ball.vy = 0;
+  accumulator = 0;
+}
+function startGame(idx) {
+  level = Math.max(0, Math.min(LEVELS.length - 1, idx | 0));
+  const p = parseLevel(LEVELS[level]);
+  grid = p.grid;
+  startCell = p.start;
+  goalCell = p.goal;
+  elapsed = 0; fails = 0; anim = 0; fallAt = null;
+  resetBall();
+  state = 'playing';
+  hideOverlay();
+}
+function loseBall(c, r) {
+  fails++;
+  fallAt = { x: c + 0.5, y: r + 0.5 };
+  state = 'falling';
+  anim = 0;
+}
+function winLevel() {
+  fallAt = { x: goalCell.c + 0.5, y: goalCell.r + 0.5 };
+  state = 'cleared';
+  anim = 0;
+  const key = String(level);
+  if (times[key] === undefined || elapsed < times[key]) times[key] = Math.round(elapsed * 100) / 100;
+  if (level + 1 > cleared) cleared = level + 1;
+  if (fails === 0 && level + 1 > perfects) perfects = level + 1;
+  saveProgress();
+}
+
+/* ══════════════ 物理 ══════════════ */
+function physStep(h) {
+  // 1. 重力（由傾斜量決定）
+  ball.vx += tiltX * GRAVITY * h;
+  ball.vy += tiltY * GRAVITY * h;
+
+  // 2. 地形摩擦
+  const fr = FRICTION[cellAt(ball.x, ball.y)];
+  const damp = Math.exp(-(fr === undefined ? 1.1 : fr) * h);
+  ball.vx *= damp; ball.vy *= damp;
+
+  // 3. 速度上限 —— 這是防穿牆的核心，不是為了手感
+  const sp = Math.sqrt(ball.vx * ball.vx + ball.vy * ball.vy);
+  if (sp > MAX_SPEED) { ball.vx = ball.vx / sp * MAX_SPEED; ball.vy = ball.vy / sp * MAX_SPEED; }
+
+  // 4. 位移
+  ball.x += ball.vx * h;
+  ball.y += ball.vy * h;
+
+  // 5. 牆碰撞（圓 vs AABB，掃描珠子周圍格）
+  const c0 = Math.floor(ball.x - BALL_R) - 1, c1 = Math.floor(ball.x + BALL_R) + 1;
+  const r0 = Math.floor(ball.y - BALL_R) - 1, r1 = Math.floor(ball.y + BALL_R) + 1;
+  for (let r = r0; r <= r1; r++) {
+    for (let c = c0; c <= c1; c++) {
+      if (!isWall(c, r)) continue;
+      const nx = Math.max(c, Math.min(ball.x, c + 1));
+      const ny = Math.max(r, Math.min(ball.y, r + 1));
+      let dx = ball.x - nx, dy = ball.y - ny;
+      let d2 = dx * dx + dy * dy;
+      if (d2 >= BALL_R * BALL_R) continue;
+      let ux, uy;
+      if (d2 < 1e-12) {
+        // 珠心落在牆格內（速度上限下不該發生）→ 朝離格中心最近的邊推出
+        const ex = ball.x - (c + 0.5), ey = ball.y - (r + 0.5);
+        if (Math.abs(ex) > Math.abs(ey)) { ux = ex >= 0 ? 1 : -1; uy = 0; }
+        else { ux = 0; uy = ey >= 0 ? 1 : -1; }
+        ball.x = c + 0.5 + ux * (0.5 + BALL_R);
+        ball.y = r + 0.5 + uy * (0.5 + BALL_R);
+      } else {
+        const d = Math.sqrt(d2);
+        ux = dx / d; uy = dy / d;
+        ball.x = nx + ux * BALL_R;
+        ball.y = ny + uy * BALL_R;
+      }
+      const vn = ball.vx * ux + ball.vy * uy;
+      if (vn < 0) {
+        ball.vx -= (1 + RESTITUTION) * vn * ux;
+        ball.vy -= (1 + RESTITUTION) * vn * uy;
+      }
+    }
+  }
+
+  // 6. 洞判定（珠心進入洞口半徑就掉）
+  const bc = Math.floor(ball.x), br = Math.floor(ball.y);
+  for (let dr = -1; dr <= 1; dr++) {
+    for (let dc = -1; dc <= 1; dc++) {
+      const c = bc + dc, r = br + dr;
+      const ch = cellCh(c, r);
+      if (ch !== HOLE && ch !== GOAL) continue;
+      const dx = ball.x - (c + 0.5), dy = ball.y - (r + 0.5);
+      if (dx * dx + dy * dy >= HOLE_R * HOLE_R) continue;
+      if (ch === GOAL) winLevel(); else loseBall(c, r);
+      return;
+    }
+  }
+}
+
+function update(dt) {
+  if (dt > 0.1) dt = 0.1;   // 分頁切回來時的大跳躍，不要一次補完
+
+  // 傾斜平滑（鍵盤/拖曳輸入需要，陀螺儀本身已連續）
+  const k = Math.min(1, dt * TILT_SMOOTH);
+  tiltX += (targetTiltX - tiltX) * k;
+  tiltY += (targetTiltY - tiltY) * k;
+
+  if (state === 'playing') {
+    elapsed += dt;
+    accumulator += dt;
+    let n = 0;
+    while (accumulator >= FIXED_DT && n < MAX_SUBSTEPS) {
+      physStep(FIXED_DT);
+      accumulator -= FIXED_DT;
+      n++;
+      if (state !== 'playing') { accumulator = 0; break; }
+    }
+    if (n >= MAX_SUBSTEPS) accumulator = 0;
+  } else if (state === 'falling') {
+    anim += dt;
+    if (anim >= FALL_TIME) { resetBall(); state = 'playing'; anim = 0; fallAt = null; }
+  } else if (state === 'cleared') {
+    anim += dt;
+    if (anim >= CLEAR_TIME) {
+      if (level + 1 >= LEVELS.length) { state = 'finished'; showFinished(); }
+      else { showCleared(); }
+    }
+  }
+}
+
+/* ══════════════ 輸入 ══════════════ */
+function setTilt(ax, ay) {
+  targetTiltX = Math.max(-1, Math.min(1, ax));
+  targetTiltY = Math.max(-1, Math.min(1, ay));
+}
+
+// 依螢幕方向把 beta/gamma 換算成螢幕座標的傾斜
+function orientationToTilt(beta, gamma, angle) {
+  let ax, ay;
+  if (angle === 90) { ax = beta; ay = -gamma; }
+  else if (angle === 180) { ax = -gamma; ay = -beta; }
+  else if (angle === 270 || angle === -90) { ax = -beta; ay = gamma; }
+  else { ax = gamma; ay = beta; }
+  return [ax, ay];
+}
+function screenAngle() {
+  try {
+    if (typeof screen !== 'undefined' && screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+    if (typeof orientation === 'number') return orientation;
+  } catch (e) {}
+  return 0;
+}
+function onOrientation(e) {
+  if (e.beta === null || e.gamma === null) return;
+  lastBeta = e.beta; lastGamma = e.gamma;
+  if (calBeta === null) { calBeta = e.beta; calGamma = e.gamma; }
+  const t = orientationToTilt(e.beta - calBeta, e.gamma - calGamma, screenAngle());
+  const nx = Math.max(-MAX_TILT_DEG, Math.min(MAX_TILT_DEG, t[0] * sens)) / MAX_TILT_DEG;
+  const ny = Math.max(-MAX_TILT_DEG, Math.min(MAX_TILT_DEG, t[1] * sens)) / MAX_TILT_DEG;
+  controlMode = 'tilt';
+  setTilt(nx, ny);
+}
+function recalibrate() { calBeta = lastBeta; calGamma = lastGamma; setTilt(0, 0); tiltX = 0; tiltY = 0; }
+
+function keyTilt() {
+  if (controlMode === 'tilt') return;
+  const l = keys['ArrowLeft'] || keys['a'] || keys['A'];
+  const r = keys['ArrowRight'] || keys['d'] || keys['D'];
+  const u = keys['ArrowUp'] || keys['w'] || keys['W'];
+  const dn = keys['ArrowDown'] || keys['s'] || keys['S'];
+  setTilt((r ? 1 : 0) - (l ? 1 : 0), (dn ? 1 : 0) - (u ? 1 : 0));
+}
+
+/* ══════════════ 畫面 ══════════════ */
+const cv = document.getElementById('cv');
+const ctx = cv ? cv.getContext('2d') : null;
+let W = 800, H = 600, board = 400, ox = 0, oy = 0, cellPx = 26;
+
+function resize() {
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  W = window.innerWidth || 800;
+  H = window.innerHeight || 600;
+  if (cv) {
+    cv.width = Math.floor(W * dpr);
+    cv.height = Math.floor(H * dpr);
+    cv.style.width = W + 'px';
+    cv.style.height = H + 'px';
+    if (ctx && ctx.setTransform) ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const hud = 52, bottom = 46, pad = 10;
+  board = Math.max(120, Math.min(W - pad * 2, H - hud - bottom - pad * 2));
+  ox = (W - board) / 2;
+  // 重心偏上：手機直式時剩餘空間 1/3 給上方、2/3 留給下方持機的手，免得拇指擋住盤面
+  oy = hud + Math.max(pad, (H - hud - bottom - board) * 0.34);
+  cellPx = board / N;
+}
+
+function fmtTime(t) {
+  const m = Math.floor(t / 60), s = t - m * 60;
+  return m > 0 ? m + ':' + (s < 10 ? '0' : '') + s.toFixed(1) : s.toFixed(1) + 's';
+}
+
+function draw() {
+  if (!ctx) return;
+  ctx.fillStyle = '#0b0e14';
+  ctx.fillRect(0, 0, W, H);
+  if (!grid) return;
+
+  // 盤面隨傾斜輕微位移，讓「盤子在傾斜」這件事看得見
+  const shx = tiltX * 5, shy = tiltY * 5;
+
+  ctx.save();
+  ctx.translate(ox + shx, oy + shy);
+
+  // 盤底
+  ctx.fillStyle = '#151b26';
+  ctx.fillRect(0, 0, board, board);
+
+  // 地形
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const ch = grid[r][c];
+      if (ch !== ICE && ch !== SAND) continue;
+      ctx.fillStyle = ch === ICE ? 'rgba(79,195,247,.17)' : 'rgba(201,162,39,.17)';
+      ctx.fillRect(c * cellPx, r * cellPx, cellPx, cellPx);
+    }
+  }
+
+  // 牆（陰影方向跟著傾斜，強化立體感）
+  const sx = -tiltX * cellPx * 0.22, sy = -tiltY * cellPx * 0.22;
+  ctx.fillStyle = 'rgba(0,0,0,.45)';
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (grid[r][c] !== WALL) continue;
+    ctx.fillRect(c * cellPx + sx, r * cellPx + sy, cellPx, cellPx);
+  }
+  ctx.fillStyle = '#2b3446';
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (grid[r][c] !== WALL) continue;
+    ctx.fillRect(c * cellPx, r * cellPx, cellPx, cellPx);
+  }
+  ctx.fillStyle = 'rgba(255,255,255,.07)';
+  for (let r = 0; r < N; r++) for (let c = 0; c < N; c++) {
+    if (grid[r][c] !== WALL) continue;
+    ctx.fillRect(c * cellPx, r * cellPx, cellPx, Math.max(1, cellPx * 0.16));
+  }
+
+  // 洞
+  for (let r = 0; r < N; r++) {
+    for (let c = 0; c < N; c++) {
+      const ch = grid[r][c];
+      if (ch !== HOLE && ch !== GOAL) continue;
+      const x = (c + 0.5) * cellPx, y = (r + 0.5) * cellPx, rad = HOLE_R * cellPx;
+      if (ch === GOAL) {
+        ctx.beginPath(); ctx.arc(x, y, rad + Math.max(1.5, cellPx * 0.09), 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(230,193,90,.28)'; ctx.fill();
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = '#080a0f'; ctx.fill();
+        ctx.lineWidth = Math.max(1.2, cellPx * 0.07); ctx.strokeStyle = '#e6c15a'; ctx.stroke();
+      } else {
+        ctx.beginPath(); ctx.arc(x, y, rad, 0, Math.PI * 2);
+        ctx.fillStyle = '#05070b'; ctx.fill();
+        ctx.lineWidth = Math.max(1, cellPx * 0.05); ctx.strokeStyle = 'rgba(255,255,255,.10)'; ctx.stroke();
+      }
+    }
+  }
+
+  // 珠子
+  let bx = ball.x * cellPx, by = ball.y * cellPx, br = BALL_R * cellPx;
+  let alpha = 1;
+  if (state === 'falling' && fallAt) {
+    const t = Math.min(1, anim / FALL_TIME);
+    bx = fallAt.x * cellPx; by = fallAt.y * cellPx;
+    br = BALL_R * cellPx * (1 - t * 0.85);
+    alpha = 1 - t * 0.7;
+  } else if (state === 'cleared' && fallAt) {
+    const t = Math.min(1, anim / CLEAR_TIME);
+    bx = fallAt.x * cellPx; by = fallAt.y * cellPx;
+    br = BALL_R * cellPx * (1 - t * 0.8);
+    alpha = 1 - t * 0.5;
+  }
+  if (br > 0.4) {
+    ctx.globalAlpha = alpha;
+    ctx.beginPath(); ctx.arc(bx + br * 0.28, by + br * 0.34, br, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(0,0,0,.4)'; ctx.fill();
+    let grad = null;
+    if (ctx.createRadialGradient) {
+      grad = ctx.createRadialGradient(bx - br * 0.35 - tiltX * br * 0.2, by - br * 0.35 - tiltY * br * 0.2, br * 0.1, bx, by, br);
+      grad.addColorStop(0, '#fff3c4'); grad.addColorStop(0.45, '#e6c15a'); grad.addColorStop(1, '#9a7c22');
+    }
+    ctx.beginPath(); ctx.arc(bx, by, br, 0, Math.PI * 2);
+    ctx.fillStyle = grad || '#e6c15a'; ctx.fill();
+    ctx.globalAlpha = 1;
+  }
+
+  // 盤框
+  ctx.lineWidth = 2; ctx.strokeStyle = '#39445a';
+  ctx.strokeRect(0, 0, board, board);
+  ctx.restore();
+
+  // HUD
+  ctx.fillStyle = '#e6edf3';
+  ctx.font = '600 17px -apple-system,system-ui,sans-serif';
+  ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('第 ' + (level + 1) + ' 關', 16, 26);
+  ctx.textAlign = 'center';
+  ctx.fillStyle = '#e6c15a';
+  ctx.fillText(fmtTime(elapsed), W / 2, 26);
+  ctx.textAlign = 'right';
+  ctx.fillStyle = fails > 0 ? '#e07a5a' : '#6b7684';
+  ctx.fillText('失誤 ' + fails, W - 16, 26);
+
+  // 底部提示
+  ctx.textAlign = 'center';
+  ctx.font = '12px -apple-system,system-ui,sans-serif';
+  ctx.fillStyle = '#4c5766';
+  const best = times[String(level)];
+  const modeTxt = controlMode === 'tilt' ? '傾斜手機' : (controlMode === 'drag' ? '拖曳畫面' : '方向鍵 / WASD');
+  ctx.fillText(modeTxt + (best !== undefined ? '　·　本關最佳 ' + fmtTime(best) : '') + '　·　P 暫停', W / 2, H - 24);
+}
+
+/* ══════════════ 疊層 UI ══════════════ */
+const overlay = document.getElementById('overlay');
+const panel = document.getElementById('panel');
+
+function showOverlay(html) {
+  if (!panel || !overlay) return;
+  panel.innerHTML = html;
+  overlay.classList.remove('hidden');
+}
+function hideOverlay() { if (overlay) overlay.classList.add('hidden'); }
+
+function levelGrid() {
+  let h = '<div class="grid">';
+  for (let i = 0; i < LEVELS.length; i++) {
+    const lock = i > cleared;
+    const done = i < cleared;
+    const perfect = i < perfects;
+    const cls = lock ? 'lv lock' : (perfect ? 'lv perfect' : (done ? 'lv done' : 'lv'));
+    h += '<button class="' + cls + '"' + (lock ? ' disabled' : ' data-act="play" data-lv="' + i + '"') + '>' + (i + 1) + '</button>';
+  }
+  return h + '</div>';
+}
+
+function showTitle() {
+  state = 'menu';
+  const started = cleared > 0;
+  showOverlay(
+    '<h1>迷宮球</h1><div class="sub">TILT MAZE</div>' +
+    '<div class="msg">傾斜手機，把金珠滾進<span style="color:#e6c15a">金色終點洞</span>。\n黑洞會吃掉珠子，冰面很滑、沙地很黏。</div>' +
+    '<button class="primary" data-act="start">' + (started ? '繼續第 ' + Math.min(cleared + 1, LEVELS.length) + ' 關' : '開始遊戲') + '</button>' +
+    (started ? '<button data-act="levels">選擇關卡</button>' : '') +
+    '<button class="ghost" data-act="settings">設定</button>' +
+    '<div class="note">iPhone / Android 會請求動作感測器權限；電腦上用方向鍵或滑鼠拖曳。</div>',
+  );
+}
+function showLevels() {
+  showOverlay('<h1>選擇關卡</h1><div class="sub">' + cleared + ' / ' + LEVELS.length + ' 已通關</div>' +
+    levelGrid() +
+    '<div class="note" style="margin-bottom:14px">金框 = 無失誤通關</div>' +
+    '<button class="ghost" data-act="title">返回</button>');
+}
+function showSettings() {
+  showOverlay('<h1>設定</h1><div class="sub">SETTINGS</div>' +
+    '<div class="row"><span>靈敏度</span><input type="range" id="sens" min="0.4" max="2.2" step="0.1" value="' + sens + '"><span id="sensv">' + sens.toFixed(1) + '</span></div>' +
+    '<button data-act="recal">把目前姿勢設為水平</button>' +
+    '<div class="note" style="margin-bottom:14px">拿著手機的角度不會是完全水平。覺得珠子一直往同一邊跑，就按上面這顆重新校正。</div>' +
+    '<button class="ghost" data-act="title">返回</button>');
+  const el = document.getElementById('sens');
+  if (el && el.addEventListener) el.addEventListener('input', function () {
+    sens = parseFloat(el.value) || 1;
+    lsSet('maze_sens', sens);
+    const v = document.getElementById('sensv');
+    if (v) v.textContent = sens.toFixed(1);
+  });
+}
+function showCleared() {
+  state = 'menu';
+  const best = times[String(level)];
+  showOverlay('<div class="big">第 ' + (level + 1) + ' 關完成</div>' +
+    '<div class="sub">' + (fails === 0 ? '無失誤 ✦' : '失誤 ' + fails + ' 次') + '</div>' +
+    '<div class="msg">本關用時 ' + fmtTime(elapsed) + (best !== undefined && best < elapsed ? '\n最佳 ' + fmtTime(best) : '') + '</div>' +
+    '<button class="primary" data-act="next">下一關</button>' +
+    '<button data-act="retry">重玩本關</button>' +
+    '<button class="ghost" data-act="title">回主畫面</button>');
+}
+function showFinished() {
+  state = 'menu';
+  showOverlay('<div class="big">全部 ' + LEVELS.length + ' 關通關</div><div class="sub">TILT MAZE CLEARED</div>' +
+    '<div class="msg">無失誤通關 ' + perfects + ' 關。\n每一關都還有更快的走法。</div>' +
+    '<button class="primary" data-act="levels">挑戰更快紀錄</button>' +
+    '<button class="ghost" data-act="title">回主畫面</button>');
+}
+function showPaused() {
+  showOverlay('<h1>暫停</h1><div class="sub">第 ' + (level + 1) + ' 關</div>' +
+    '<button class="primary" data-act="resume">繼續</button>' +
+    '<button data-act="retry">重玩本關</button>' +
+    '<button data-act="recal">重新校正水平</button>' +
+    '<button class="ghost" data-act="title">回主畫面</button>');
+}
+
+/* ══════════════ 感測器權限 ══════════════ */
+function enableTilt() {
+  // iOS 13+ 必須在使用者手勢裡呼叫；拒絕或不支援就退回拖曳操作
+  try {
+    const DOE = window.DeviceOrientationEvent;
+    if (DOE && typeof DOE.requestPermission === 'function') {
+      return DOE.requestPermission().then(function (res) {
+        if (res === 'granted') { window.addEventListener('deviceorientation', onOrientation); controlMode = 'tilt'; }
+        else controlMode = 'drag';
+      }).catch(function () { controlMode = 'drag'; });
+    }
+    if (DOE) { window.addEventListener('deviceorientation', onOrientation); }
+  } catch (e) {}
+  return Promise.resolve();
+}
+
+/* ══════════════ 事件 ══════════════ */
+function act(a, el) {
+  if (a === 'start') { enableTilt(); startGame(Math.min(cleared, LEVELS.length - 1)); }
+  else if (a === 'play') { enableTilt(); startGame(parseInt(el.getAttribute('data-lv'), 10) || 0); }
+  else if (a === 'levels') showLevels();
+  else if (a === 'settings') showSettings();
+  else if (a === 'title') showTitle();
+  else if (a === 'next') startGame(Math.min(level + 1, LEVELS.length - 1));
+  else if (a === 'retry') startGame(level);
+  else if (a === 'resume') { state = 'playing'; hideOverlay(); }
+  else if (a === 'recal') { recalibrate(); }
+}
+
+function bindEvents() {
+  if (overlay && overlay.addEventListener) {
+    overlay.addEventListener('click', function (e) {
+      let t = e.target;
+      while (t && t !== overlay && !t.getAttribute?.('data-act')) t = t.parentNode;
+      const a = t && t.getAttribute ? t.getAttribute('data-act') : null;
+      if (a) act(a, t);
+    });
+  }
+  window.addEventListener('resize', resize);
+  window.addEventListener('keydown', function (e) {
+    keys[e.key] = true;
+    if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') {
+      if (state === 'playing') { state = 'paused'; showPaused(); }
+      else if (state === 'paused') { state = 'playing'; hideOverlay(); }
+    }
+    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', ' '].indexOf(e.key) >= 0 && e.preventDefault) e.preventDefault();
+  });
+  window.addEventListener('keyup', function (e) { keys[e.key] = false; });
+
+  // 拖曳操作（電腦滑鼠 / 沒有感測器權限的手機）
+  let dragging = false;
+  function pt(e) {
+    const t = (e.touches && e.touches[0]) || e;
+    return { x: t.clientX, y: t.clientY };
+  }
+  function dragTo(e) {
+    if (!dragging || controlMode === 'tilt') return;
+    const p = pt(e);
+    const cx = ox + board / 2, cy = oy + board / 2;
+    const rad = board / 2;
+    controlMode = 'drag';
+    setTilt(((p.x - cx) / rad) * sens, ((p.y - cy) / rad) * sens);
+  }
+  function down(e) { dragging = true; dragTo(e); }
+  function up() { dragging = false; if (controlMode === 'drag') setTilt(0, 0); }
+  if (cv && cv.addEventListener) {
+    cv.addEventListener('mousedown', down);
+    cv.addEventListener('mousemove', dragTo);
+    cv.addEventListener('touchstart', function (e) { down(e); if (e.preventDefault) e.preventDefault(); }, { passive: false });
+    cv.addEventListener('touchmove', function (e) { dragTo(e); if (e.preventDefault) e.preventDefault(); }, { passive: false });
+    cv.addEventListener('touchend', up);
+  }
+  window.addEventListener('mouseup', up);
+  window.addEventListener('blur', function () { dragging = false; if (state === 'playing') { state = 'paused'; showPaused(); } });
+}
+
+/* ══════════════ 主迴圈 ══════════════ */
+let lastT = 0;
+function frame(t) {
+  const dt = lastT ? Math.min(0.1, (t - lastT) / 1000) : 0.016;
+  lastT = t;
+  keyTilt();
+  if (state !== 'paused' && state !== 'menu') update(dt);
+  draw();
+  requestAnimationFrame(frame);
+}
+
+function init() {
+  resize();
+  bindEvents();
+  grid = parseLevel(LEVELS[0]).grid;   // 讓標題畫面背後有東西可看
+  showTitle();
+  requestAnimationFrame(frame);
+  if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    navigator.serviceWorker.register('sw.js').catch(function () {});
+  }
+}
+init();
+</script>
+</body>
+</html>
