@@ -27,6 +27,7 @@
   button:active { background:#243044; }
   button.primary { background:#e6c15a; color:#1a1405; border-color:#e6c15a; font-weight:600; }
   button.ghost { background:transparent; color:#8b98a9; border-color:#222b3a; }
+  button.danger { background:#3a1d1d; color:#ff9b8a; border-color:#7a3a34; font-weight:600; }
   .grid { display:grid; grid-template-columns:repeat(5,1fr); gap:7px; margin:6px 0 16px; }
   .lv { padding:11px 0; font-size:14px; border-radius:8px; border:1px solid #2c3648;
     background:#161c27; color:#e6edf3; cursor:pointer; }
@@ -615,6 +616,18 @@ function saveProgress() {
   try { lsSet('maze_stars', JSON.stringify(stars)); } catch (e) {}
 }
 
+// 重新開始：只清進度，**不動偏好設定**（靈敏度、音效是使用者調過的，跟進度無關）
+let resetArmed = false;
+function resetProgress() {
+  cleared = 0; perfects = 0; times = {}; stars = {};
+  try {
+    localStorage.removeItem('maze_cleared');
+    localStorage.removeItem('maze_perfect');
+    localStorage.removeItem('maze_times');
+    localStorage.removeItem('maze_stars');
+  } catch (e) {}
+}
+
 /* ══════════════ 關卡解析 ══════════════ */
 function parseLevel(rows) {
   const g = rows.slice();
@@ -1134,6 +1147,11 @@ function showSettings() {
     '<button data-act="recal">把目前姿勢設為水平</button>' +
     '<button data-act="sfx">音效：' + (sfxOn ? '開' : '關') + '</button>' +
     '<div class="note" style="margin-bottom:14px">拿著手機的角度不會是完全水平。覺得球一直往同一邊跑，就按上面那顆重新校正。</div>' +
+    (cleared > 0
+      ? '<button data-act="reset" class="' + (resetArmed ? 'danger' : 'ghost') + '">' +
+        (resetArmed ? '⚠ 再按一次，' + cleared + ' 關進度與 ★' + totalStars() + ' 會全部清掉' : '重新開始（清除進度）') + '</button>' +
+        (resetArmed ? '<button class="ghost" data-act="settings">取消</button>' : '')
+      : '<div class="note" style="margin-bottom:14px">目前沒有進度可清除。</div>') +
     '<button class="ghost" data-act="title">返回</button>');
   const el = document.getElementById('sens');
   if (el && el.addEventListener) el.addEventListener('input', function () {
@@ -1191,6 +1209,8 @@ function enableTilt() {
 /* ══════════════ 事件 ══════════════ */
 function act(a, el) {
   initAudio();                          // 必須在使用者手勢裡啟動，iOS 才給聲音
+  // 離開「重新開始」按鈕就解除待確認狀態，避免下次進設定還停在危險狀態
+  if (a !== 'reset') resetArmed = false;
   if (a === 'start') { enableTilt(); startGame(Math.min(cleared, LEVELS.length - 1)); }
   else if (a === 'play') { enableTilt(); startGame(parseInt(el.getAttribute('data-lv'), 10) || 0); }
   else if (a === 'levels') showLevels();
@@ -1201,6 +1221,10 @@ function act(a, el) {
   else if (a === 'resume') { state = 'playing'; hideOverlay(); }
   else if (a === 'recal') { recalibrate(); }
   else if (a === 'sfx') { sfxOn = !sfxOn; lsSet('maze_sfx', sfxOn ? '1' : '0'); if (sfxOn) tone(660, 0.1, 'triangle', 0.12); showSettings(); }
+  else if (a === 'reset') {
+    if (!resetArmed) { resetArmed = true; showSettings(); }        // 第一次只是舉起，不動資料
+    else { resetProgress(); resetArmed = false; showTitle(); }     // 再按一次才真的清
+  }
 }
 
 function bindEvents() {
