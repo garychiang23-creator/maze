@@ -628,6 +628,23 @@ function resetProgress() {
   } catch (e) {}
 }
 
+/* 關卡改版偵測。
+   localStorage 是每台裝置各自獨立的，舊裝置上的進度是針對「舊的那批關卡」記的。
+   關卡結構整個換掉之後，那份進度不只沒意義，還會把玩家直接送到最難的一關，
+   跳過整條重新設計的難度曲線 —— 所以由程式主動作廢，不要求玩家自己去清。
+   ⚠ 動到 LEVELS 內容時，LEVELS_VERSION 要 +1。 */
+const LEVELS_VERSION = 3;
+let progressWiped = false;
+function migrateProgress() {
+  const savedVer = parseInt(lsGet('maze_lv_ver', '0'), 10) || 0;
+  if (savedVer < LEVELS_VERSION && (cleared > 0 || Object.keys(stars).length > 0)) {
+    resetProgress();
+    progressWiped = true;
+  }
+  lsSet('maze_lv_ver', LEVELS_VERSION);
+}
+migrateProgress();
+
 /* ══════════════ 關卡解析 ══════════════ */
 function parseLevel(rows) {
   const g = rows.slice();
@@ -1125,8 +1142,11 @@ function levelGrid() {
 function showTitle() {
   state = 'menu';
   const started = cleared > 0;
+  const wiped = progressWiped;
+  progressWiped = false;              // 只提示一次，之後回主畫面不再重複
   showOverlay(
     '<h1>迷宮球</h1><div class="sub">TILT MAZE</div>' +
+    (wiped ? '<div class="msg" style="color:#e6c15a;border:1px solid #4a3f1c;border-radius:10px;padding:12px">20 關已全面改版：盤面、路線、陷阱、手感全部重做。\n舊進度不適用，已從第 1 關重新開始。</div>' : '') +
     '<div class="msg">傾斜手機，把金珠滾進<span style="color:#e6c15a">金色終點洞</span>。\n黑洞會吃掉珠子，冰面很滑、沙地很黏。</div>' +
     (started ? '<div class="msg" style="color:#e6c15a;margin-top:-10px">★ ' + totalStars() + ' / ' + (LEVELS.length * 3) + '</div>' : '') +
     '<button class="primary" data-act="start">' + (started ? '繼續第 ' + Math.min(cleared + 1, LEVELS.length) + ' 關' : '開始遊戲') + '</button>' +

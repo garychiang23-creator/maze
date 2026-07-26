@@ -1,7 +1,7 @@
 'use strict';
 // 離線快取：HTML 走「網路優先」（有網拿最新版），其餘「快取優先」
 // 改版時把 CACHE 版本號 +1，舊快取會自動清掉
-const CACHE = 'maze-v4';
+const CACHE = 'maze-v5';
 const ASSETS = [
   './',
   './index.html',
